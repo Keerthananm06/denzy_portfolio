@@ -1,59 +1,55 @@
 document.addEventListener("DOMContentLoaded", () => {
 
-
     /* =====================================================
        ELEMENTS
     ===================================================== */
 
-    const header =
-        document.getElementById("siteHeader");
+    const header = document.getElementById("siteHeader");
+    const menuToggle = document.getElementById("menuToggle");
+    const navMenu = document.getElementById("navMenu");
+    const backTop = document.getElementById("backTop");
 
-    const menuToggle =
-        document.getElementById("menuToggle");
+    const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)"
+    ).matches;
 
-    const navMenu =
-        document.getElementById("navMenu");
-
-    const backTop =
-        document.getElementById("backTop");
+    const hasObserver = "IntersectionObserver" in window;
 
 
 
     /* =====================================================
-       HEADER SCROLL
+       HEADER + BACK-TO-TOP VISIBILITY ON SCROLL
+       (throttled to one update per animation frame)
     ===================================================== */
 
-    function handleScroll() {
+    let scrollTicking = false;
+
+    function updateOnScroll() {
+        const y = window.scrollY;
 
         if (header) {
-
-            header.classList.toggle(
-                "scrolled",
-                window.scrollY > 25
-            );
-
+            header.classList.toggle("scrolled", y > 25);
         }
-
 
         if (backTop) {
-
-            backTop.classList.toggle(
-                "show",
-                window.scrollY > 600
-            );
-
+            backTop.classList.toggle("show", y > 600);
         }
 
+        scrollTicking = false;
     }
-
 
     window.addEventListener(
         "scroll",
-        handleScroll
+        () => {
+            if (!scrollTicking) {
+                scrollTicking = true;
+                requestAnimationFrame(updateOnScroll);
+            }
+        },
+        { passive: true }
     );
 
-
-    handleScroll();
+    updateOnScroll();
 
 
 
@@ -61,62 +57,41 @@ document.addEventListener("DOMContentLoaded", () => {
        MOBILE MENU
     ===================================================== */
 
+    function setMenu(open) {
+        if (!menuToggle || !navMenu) return;
+
+        navMenu.classList.toggle("open", open);
+        menuToggle.setAttribute("aria-expanded", String(open));
+        menuToggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    }
+
+    function isMenuOpen() {
+        return Boolean(navMenu && navMenu.classList.contains("open"));
+    }
+
     if (menuToggle && navMenu) {
 
-        menuToggle.addEventListener(
-            "click",
-            () => {
+        menuToggle.addEventListener("click", () => {
+            setMenu(!isMenuOpen());
+        });
 
-                const open =
-                    navMenu.classList.toggle(
-                        "open"
-                    );
+        // Close after choosing a link
+        navMenu.querySelectorAll("a").forEach(link => {
+            link.addEventListener("click", () => setMenu(false));
+        });
 
-
-                menuToggle.setAttribute(
-                    "aria-expanded",
-                    String(open)
-                );
-
-
-                menuToggle.setAttribute(
-                    "aria-label",
-                    open
-                        ? "Close menu"
-                        : "Open menu"
-                );
-
+        // Close when tapping outside the header
+        document.addEventListener("click", event => {
+            if (isMenuOpen() && header && !header.contains(event.target)) {
+                setMenu(false);
             }
-        );
+        });
 
-
-        navMenu
-            .querySelectorAll("a")
-            .forEach(link => {
-
-                link.addEventListener(
-                    "click",
-                    () => {
-
-                        navMenu.classList.remove(
-                            "open"
-                        );
-
-
-                        menuToggle.setAttribute(
-                            "aria-expanded",
-                            "false"
-                        );
-
-
-                        menuToggle.setAttribute(
-                            "aria-label",
-                            "Open menu"
-                        );
-
-                    }
-                );
-
+        // Reset state when the layout switches to the desktop navigation
+        window
+            .matchMedia("(min-width: 1180px)")
+            .addEventListener("change", event => {
+                if (event.matches) setMenu(false);
             });
 
     }
@@ -124,69 +99,76 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     /* =====================================================
-       SCROLL REVEAL
+       ESCAPE KEY
     ===================================================== */
 
-    const revealElements =
-        document.querySelectorAll(".reveal");
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && isMenuOpen()) {
+            setMenu(false);
+
+            if (menuToggle) menuToggle.focus();
+        }
+    });
 
 
-    if (
-        "IntersectionObserver"
-        in window
-    ) {
 
-        const revealObserver =
-            new IntersectionObserver(
-                (entries, observer) => {
+    /* =====================================================
+       SCROLL REVEAL
+       Elements that were scrolled past (for example by an
+       anchor jump) are revealed immediately, never left blank.
+    ===================================================== */
 
-                    entries.forEach(entry => {
+    const revealElements = document.querySelectorAll(".reveal");
 
-                        if (
-                            entry.isIntersecting
-                        ) {
+    if (hasObserver && !prefersReducedMotion) {
 
-                            entry.target.classList.add(
-                                "show"
-                            );
+        const revealObserver = new IntersectionObserver(
+            (entries, observer) => {
 
+                entries.forEach(entry => {
 
-                            observer.unobserve(
-                                entry.target
-                            );
+                    const scrolledPast = entry.boundingClientRect.top < 0;
 
-                        }
+                    if (entry.isIntersecting || scrolledPast) {
+                        entry.target.classList.add("show");
+                        observer.unobserve(entry.target);
+                    }
 
-                    });
+                });
 
-                },
-                {
-                    threshold: 0.12
-                }
-            );
-
-
-        revealElements.forEach(
-            element => {
-
-                revealObserver.observe(
-                    element
-                );
-
+            },
+            {
+                threshold: 0,
+                rootMargin: "0px 0px -8% 0px"
             }
         );
+
+        revealElements.forEach(element => revealObserver.observe(element));
+
+        // When a nav/anchor link jumps down the page, reveal everything
+        // above the target at once so the scroll never passes blank areas.
+        document.addEventListener("click", event => {
+            const link = event.target.closest('a[href^="#"]');
+
+            if (!link || link.hash.length < 2) return;
+
+            const target = document.getElementById(link.hash.slice(1));
+
+            if (!target) return;
+
+            revealElements.forEach(element => {
+                if (
+                    target.compareDocumentPosition(element) &
+                    Node.DOCUMENT_POSITION_PRECEDING
+                ) {
+                    element.classList.add("show");
+                }
+            });
+        });
 
     } else {
 
-        revealElements.forEach(
-            element => {
-
-                element.classList.add(
-                    "show"
-                );
-
-            }
-        );
+        revealElements.forEach(element => element.classList.add("show"));
 
     }
 
@@ -196,140 +178,68 @@ document.addEventListener("DOMContentLoaded", () => {
        COUNTERS
     ===================================================== */
 
-    const counters =
-        document.querySelectorAll(
-            ".counter"
-        );
+    const counters = document.querySelectorAll(".counter");
 
+    function formatCounter(value, target) {
+        return Number.isInteger(target)
+            ? String(Math.floor(value))
+            : value.toFixed(1);
+    }
 
-    if (
-        "IntersectionObserver"
-        in window
-    ) {
+    function animateCounter(counter) {
+        const target = Number(counter.dataset.target);
 
-        const counterObserver =
-            new IntersectionObserver(
+        if (Number.isNaN(target)) return;
+
+        if (prefersReducedMotion) {
+            counter.textContent = formatCounter(target, target);
+            return;
+        }
+
+        const duration = 1400;
+        const start = performance.now();
+
+        function update(now) {
+            const progress = Math.min((now - start) / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);
+
+            counter.textContent = formatCounter(target * eased, target);
+
+            if (progress < 1) {
+                requestAnimationFrame(update);
+            } else {
+                counter.textContent = formatCounter(target, target);
+            }
+        }
+
+        requestAnimationFrame(update);
+    }
+
+    if (counters.length) {
+
+        if (hasObserver) {
+
+            const counterObserver = new IntersectionObserver(
                 (entries, observer) => {
 
                     entries.forEach(entry => {
+                        if (!entry.isIntersecting) return;
 
-                        if (
-                            !entry.isIntersecting
-                        ) {
-                            return;
-                        }
-
-
-                        const counter =
-                            entry.target;
-
-
-                        const target =
-                            Number(
-                                counter.dataset.target
-                            );
-
-
-                        const duration =
-                            1400;
-
-
-                        const start =
-                            performance.now();
-
-
-                        function update(now) {
-
-                            const progress =
-                                Math.min(
-                                    (now - start) /
-                                    duration,
-                                    1
-                                );
-
-
-                            const eased =
-                                1 -
-                                Math.pow(
-                                    1 - progress,
-                                    3
-                                );
-
-
-                            const value =
-                                target * eased;
-
-
-                            if (
-                                Number.isInteger(
-                                    target
-                                )
-                            ) {
-
-                                counter.textContent =
-                                    Math.floor(
-                                        value
-                                    );
-
-                            } else {
-
-                                counter.textContent =
-                                    value.toFixed(
-                                        1
-                                    );
-
-                            }
-
-
-                            if (
-                                progress < 1
-                            ) {
-
-                                requestAnimationFrame(
-                                    update
-                                );
-
-                            } else {
-
-                                counter.textContent =
-                                    Number.isInteger(
-                                        target
-                                    )
-                                        ? target
-                                        : target.toFixed(
-                                            1
-                                        );
-
-                            }
-
-                        }
-
-
-                        requestAnimationFrame(
-                            update
-                        );
-
-
-                        observer.unobserve(
-                            counter
-                        );
-
+                        animateCounter(entry.target);
+                        observer.unobserve(entry.target);
                     });
 
                 },
-                {
-                    threshold: 0.7
-                }
+                { threshold: 0.5 }
             );
 
+            counters.forEach(counter => counterObserver.observe(counter));
 
-        counters.forEach(counter => {
+        } else {
 
-            counterObserver.observe(
-                counter
-            );
+            counters.forEach(animateCounter);
 
-        });
+        }
 
     }
 
@@ -340,174 +250,92 @@ document.addEventListener("DOMContentLoaded", () => {
     ===================================================== */
 
     if (backTop) {
-
-        backTop.addEventListener(
-            "click",
-            () => {
-
-                window.scrollTo({
-                    top: 0,
-                    behavior: "smooth"
-                });
-
-            }
-        );
-
+        backTop.addEventListener("click", () => {
+            window.scrollTo({
+                top: 0,
+                behavior: prefersReducedMotion ? "auto" : "smooth"
+            });
+        });
     }
 
 
 
     /* =====================================================
        SERVICE LINKS
-       ALWAYS GO TO CONTACT
+       These are normal #contact anchors; CSS smooth scrolling
+       and scroll-padding-top handle the movement, so no
+       extra JavaScript is needed.
     ===================================================== */
-
-    const serviceLinks =
-        document.querySelectorAll(
-            ".service-link"
-        );
-
-
-    serviceLinks.forEach(link => {
-
-        link.addEventListener(
-            "click",
-            event => {
-
-                event.preventDefault();
-
-
-                const contact =
-                    document.getElementById(
-                        "contact"
-                    );
-
-
-                if (contact) {
-
-                    contact.scrollIntoView({
-                        behavior: "smooth",
-                        block: "start"
-                    });
-
-                }
-
-            }
-        );
-
-    });
 
 
 
     /* =====================================================
        CONTACT FORM
+       There is no backend or email service connected, so
+       nothing is sent from this page. On submit the visitor's
+       own email app opens with the enquiry pre-filled, and
+       the message says so plainly.
     ===================================================== */
 
-    const form =
-        document.getElementById(
-            "contactForm"
-        );
+    const form = document.getElementById("contactForm");
+    const formMessage = document.getElementById("formMessage");
 
+    const ENQUIRY_EMAIL = "hello@denzy.com";
 
-    const formMessage =
-        document.getElementById(
-            "formMessage"
-        );
+    function showFormMessage(text, isError) {
+        if (!formMessage) return;
 
-
-    if (
-        form &&
-        formMessage
-    ) {
-
-        form.addEventListener(
-            "submit",
-            event => {
-
-                event.preventDefault();
-
-
-                formMessage.textContent =
-                    "Thank you! Your enquiry has been captured. Connect this form to your email or backend before going live.";
-
-
-                form.reset();
-
-            }
-        );
-
+        formMessage.textContent = text;
+        formMessage.classList.toggle("is-error", Boolean(isError));
     }
 
+    if (form && formMessage) {
 
+        form.addEventListener("submit", event => {
 
-    /* =====================================================
-       ACTIVE NAVIGATION
-    ===================================================== */
+            event.preventDefault();
 
-    const sections =
-        document.querySelectorAll(
-            "main section[id]"
-        );
+            const data = new FormData(form);
 
+            const name = String(data.get("name") || "").trim();
+            const email = String(data.get("email") || "").trim();
+            const message = String(data.get("message") || "").trim();
+            const serviceSelect = form.elements.service;
 
-    const navLinks =
-        document.querySelectorAll(
-            ".nav-menu > a:not(.nav-cta)"
-        );
+            const serviceLabel =
+                serviceSelect && serviceSelect.selectedIndex > 0
+                    ? serviceSelect.options[serviceSelect.selectedIndex].text.trim()
+                    : "";
 
+            if (!name || !email || !serviceLabel || !message) {
+                showFormMessage(
+                    "Please complete every field before sending your enquiry.",
+                    true
+                );
+                return;
+            }
 
-    if (
-        sections.length &&
-        navLinks.length &&
-        "IntersectionObserver"
-        in window
-    ) {
+            const subject = `DENZY enquiry: ${serviceLabel}`;
 
-        const activeObserver =
-            new IntersectionObserver(
-                entries => {
+            const body = [
+                `Name: ${name}`,
+                `Email: ${email}`,
+                `Service: ${serviceLabel}`,
+                "",
+                message
+            ].join("\n");
 
-                    entries.forEach(entry => {
-
-                        if (
-                            entry.isIntersecting
-                        ) {
-
-                            navLinks.forEach(
-                                link => {
-
-                                    const href =
-                                        link.getAttribute(
-                                            "href"
-                                        );
-
-
-                                    link.classList.toggle(
-                                        "active",
-                                        href ===
-                                        `#${entry.target.id}`
-                                    );
-
-                                }
-                            );
-
-                        }
-
-                    });
-
-                },
-                {
-                    rootMargin:
-                        "-40% 0px -50% 0px"
-                }
+            showFormMessage(
+                `Your email app should open with your enquiry ready to send. ` +
+                `Nothing has been sent yet. Press Send there, or email us ` +
+                `directly at ${ENQUIRY_EMAIL}.`,
+                false
             );
 
-
-        sections.forEach(section => {
-
-            activeObserver.observe(
-                section
-            );
+            window.location.href =
+                `mailto:${ENQUIRY_EMAIL}` +
+                `?subject=${encodeURIComponent(subject)}` +
+                `&body=${encodeURIComponent(body)}`;
 
         });
 
@@ -516,38 +344,46 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     /* =====================================================
-       ESCAPE KEY
+       ACTIVE NAVIGATION
+       Sections without a nav link (Approach, Mission) keep the
+       previous highlight instead of clearing it.
     ===================================================== */
 
-    document.addEventListener(
-        "keydown",
-        event => {
+    const sections = document.querySelectorAll("main section[id]");
+    const navLinks = document.querySelectorAll(".nav-menu > a:not(.nav-cta)");
 
-            if (
-                event.key === "Escape" &&
-                navMenu &&
-                menuToggle
-            ) {
+    if (sections.length && navLinks.length && hasObserver) {
 
-                navMenu.classList.remove(
-                    "open"
-                );
+        const activeObserver = new IntersectionObserver(
+            entries => {
 
+                entries.forEach(entry => {
 
-                menuToggle.setAttribute(
-                    "aria-expanded",
-                    "false"
-                );
+                    if (!entry.isIntersecting) return;
 
+                    const id = `#${entry.target.id}`;
 
-                menuToggle.setAttribute(
-                    "aria-label",
-                    "Open menu"
-                );
+                    const hasMatch = Array.from(navLinks).some(
+                        link => link.getAttribute("href") === id
+                    );
 
-            }
+                    if (!hasMatch) return;
 
-        }
-    );
+                    navLinks.forEach(link => {
+                        link.classList.toggle(
+                            "active",
+                            link.getAttribute("href") === id
+                        );
+                    });
+
+                });
+
+            },
+            { rootMargin: "-40% 0px -50% 0px" }
+        );
+
+        sections.forEach(section => activeObserver.observe(section));
+
+    }
 
 });
